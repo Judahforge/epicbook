@@ -69,29 +69,26 @@ jobs:
 
       - name: Deploy on EC2
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
-            set -e
-            cd ~/theepicbook
+          ssh -T -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
+            "ECR_REGISTRY='${{ secrets.ECR_REGISTRY }}' AWS_REGION='${{ secrets.AWS_REGION }}' IMAGE_TAG='${{ github.sha }}' bash -s" << 'REMOTE'
+          set -e
+          cd ~/theepicbook
 
-            # Point compose at the new ECR images
-            sed -i "s|image: epicbook-backend:1.0|image: $ECR_REGISTRY/epicbook/backend:${{ github.sha }}|" docker-compose.yml
-            sed -i "s|image: epicbook-frontend:1.0|image: $ECR_REGISTRY/epicbook/frontend:${{ github.sha }}|" docker-compose.yml
+          # Point compose at the new ECR images
+          sed -i "s|image: epicbook-backend:1.0|image: $ECR_REGISTRY/epicbook/backend:$IMAGE_TAG|" docker-compose.yml
+          sed -i "s|image: epicbook-frontend:1.0|image: $ECR_REGISTRY/epicbook/frontend:$IMAGE_TAG|" docker-compose.yml
 
-            # Log in to ECR on the VM (uses the VM's instance profile if available,
-            # or the credentials we pass inline for the lab)
-            aws ecr get-login-password --region $AWS_REGION | \
-              docker login --username AWS --password-stdin $ECR_REGISTRY
+          # Auth to ECR (VM has the EC2-ECR-Pull-Role attached)
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-            docker pull $ECR_REGISTRY/epicbook/backend:${{ github.sha }}
-            docker pull $ECR_REGISTRY/epicbook/frontend:${{ github.sha }}
-
-            docker compose up -d --remove-orphans
-            docker compose ps
-          EOF
-        env:
-          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+          # Pull the new images and restart
+          docker pull "$ECR_REGISTRY/epicbook/backend:$IMAGE_TAG"
+          docker pull "$ECR_REGISTRY/epicbook/frontend:$IMAGE_TAG"
+          docker compose up -d --remove-orphans
+          docker compose ps
+          REMOTE
 
   verify:
     name: Verify Deployment
